@@ -242,6 +242,7 @@ input[type=range]{accent-color:var(--accent);min-width:110px}
         <option value="piano">Grand piano</option><option value="ep">Electric piano</option><option value="reed">Reed piano</option><option value="pad">Soft pad</option>
       </select></label>
     </div>
+    <p id="pianoInfo"></p>
     <div class="row"><label class="fld" for="volRange">Volume <input type="range" id="volRange" min="0" max="1" step="0.01"></label>
       <label class="fld" for="revRange">Reverb <input type="range" id="revRange" min="0" max="1" step="0.01"></label></div>
     <h2>MIDI keyboard</h2>
@@ -457,6 +458,7 @@ function audio(){
     for(let c=0;c<2;c++){const d=ir.getChannelData(c);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.6);}
     conv.buffer=ir;revGain=ctx.createGain();revGain.gain.value=state.reverb*0.6;bus.connect(revGain);revGain.connect(conv);conv.connect(master);
   }
+  loadPiano();
   if(ctx.state!=='running'){const p=ctx.resume();if(p&&p.then)p.then(()=>{$('unlock').hidden=true;}).catch(()=>{});}
   return ctx;
 }
@@ -466,16 +468,22 @@ function startVoice(midi,vel,when,dur){
   const t=Math.max(when||0,ctx.currentTime),f=440*Math.pow(2,(midi-69)/12),g=ctx.createGain(),oscs=[];
   const lvl=0.3*vel*Math.min(1,Math.pow(261/f,0.35)+0.25);
   let tc=1.8;
-  if(state.sound==='piano'){
-    if(!ctx._pw){const N=28,re=new Float32Array(N),im=new Float32Array(N);for(let n=1;n<N;n++)im[n]=Math.pow(n,-1.3)*(1+0.3*Math.sin(n*1.7));ctx._pw=ctx.createPeriodicWave(re,im);
-      const nb=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.08),ctx.sampleRate),d=nb.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;ctx._nb=nb;}
-    const lp=ctx.createBiquadFilter();lp.type='lowpass';lp.Q.value=0.5;
-    lp.frequency.setValueAtTime(Math.min(12000,f*(3+9*vel)),t);lp.frequency.setTargetAtTime(Math.min(7000,f*2.2+300),t,0.4);lp.connect(g);
-    [[0,1],[midi>45?3:1.5,0.5],[midi>60?-4:0,midi>60?0.4:0]].forEach(x=>{if(!x[1])return;const o=ctx.createOscillator(),og=ctx.createGain();o.setPeriodicWave(ctx._pw);o.frequency.value=f;o.detune.value=x[0];og.gain.value=x[1];o.connect(og);og.connect(lp);oscs.push(o);});
+  if(state.sound==='piano'&&sampState==='ready'){
+    let best=SAMP_NOTES[0];SAMP_NOTES.forEach(n=>{if(SAMP[n]&&(!SAMP[best]||Math.abs(n-midi)<Math.abs(best-midi)))best=n;});
+    const src=ctx.createBufferSource(),lp=ctx.createBiquadFilter();src.buffer=SAMP[best];src.playbackRate.value=Math.pow(2,(midi-best)/12);
+    lp.type='lowpass';lp.frequency.value=1200+13000*vel*vel;src.connect(lp);lp.connect(g);oscs.push(src);
+    g.gain.setValueAtTime(0.25+0.95*Math.pow(vel,1.6),t);
+  }else if(state.sound==='piano'){
+    if(!ctx._nb){const nb=ctx.createBuffer(1,Math.floor(ctx.sampleRate*0.08),ctx.sampleRate),d=nb.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;ctx._nb=nb;}
+    const dec=Math.max(0.6,Math.min(5,3*Math.pow(220/f,0.5))),B=0.0003;
+    for(let n=1;n<=10;n++){
+      const fn=f*n*Math.sqrt(1+B*n*n);if(fn>9000)break;
+      const o=ctx.createOscillator(),og=ctx.createGain(),a=Math.pow(n,-1.1)*Math.pow(vel,0.3*(n-1))*(n%7===0?0.3:1);
+      o.frequency.value=fn;og.gain.setValueAtTime(a,t);og.gain.setTargetAtTime(0,t,dec/(1+0.5*(n-1)));o.connect(og);og.connect(g);oscs.push(o);
+    }
     const ns=ctx.createBufferSource(),nf=ctx.createBiquadFilter(),ng=ctx.createGain();ns.buffer=ctx._nb;nf.type='bandpass';nf.frequency.value=Math.min(5000,f*4);
-    ng.gain.setValueAtTime(0.3*vel,t);ng.gain.exponentialRampToValueAtTime(0.001,t+0.04);ns.connect(nf);nf.connect(ng);ng.connect(g);ns.start(t);ns.stop(t+0.07);
-    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(lvl*0.8,t+0.004);g.gain.setTargetAtTime(lvl*0.3,t+0.004,0.12);
-    g.gain.setTargetAtTime(0.0001,t+0.35,Math.max(0.5,Math.min(4,2.6*Math.pow(220/f,0.45))));
+    ng.gain.setValueAtTime(0.5*vel,t);ng.gain.exponentialRampToValueAtTime(0.001,t+0.035);ns.connect(nf);nf.connect(ng);ng.connect(g);ns.start(t);ns.stop(t+0.07);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(lvl*0.75,t+0.003);g.gain.setTargetAtTime(lvl*0.45,t+0.003,0.09);
   }else if(state.sound==='pad'){
     const lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=1400;lp.connect(g);
     [-6,6].forEach(c=>{const o=ctx.createOscillator();o.type='sawtooth';o.frequency.value=f;o.detune.value=c;o.connect(lp);oscs.push(o);});
@@ -497,6 +505,18 @@ function startVoice(midi,vel,when,dur){
     g.gain.setTargetAtTime(0,r,state.sound==='pad'?0.15:state.sound==='piano'?0.11:0.07);oscs.forEach(o=>{try{o.stop(r+1);}catch(e){}});};
   if(dur)release(t+dur);
   return {release};
+}
+const SAMP={},SAMP_NOTES=[24,30,36,42,48,54,60,66,72,78,84,90,96];let sampState='idle';
+function pianoInfo(){$('pianoInfo').textContent=state.sound!=='piano'?'':sampState==='ready'?'Grand piano: recorded samples loaded.':sampState==='loading'?'Grand piano: loading recorded samples\u2026':sampState==='failed'?'Grand piano: recorded samples could not be loaded here, using a synthesised piano instead.':'';}
+function loadPiano(){
+  if(sampState!=='idle'||!ctx||state.sound!=='piano')return;sampState='loading';pianoInfo();
+  let ok=0,left=SAMP_NOTES.length;
+  SAMP_NOTES.forEach(n=>{
+    const name=(n%12===0?'C':'Fs')+(Math.floor(n/12)-1);
+    fetch('https://tonejs.github.io/audio/salamander/'+name+'.mp3').then(r=>{if(!r.ok)throw 0;return r.arrayBuffer();})
+      .then(b=>new Promise((res,rej)=>ctx.decodeAudioData(b,res,rej))).then(buf=>{SAMP[n]=buf;ok++;}).catch(()=>{})
+      .then(()=>{if(--left===0){sampState=ok>=6?'ready':'failed';pianoInfo();}});
+  });
 }
 const voices=new Map();
 function noteOn(midi,vel){noteOff(midi);const v=startVoice(midi,vel);if(v)voices.set(midi,v);}
@@ -773,7 +793,7 @@ function rebuild(){
   if(!PROGS[state.prog])state.prog=0;
   $('progSel').value=state.prog;$('progSel').onchange=e=>{state.prog=+e.target.value;sched.step=-1;renderProg();save();};
   $('accSel').value=state.acc;$('accSel').onchange=e=>{state.acc=e.target.value;save();};
-  $('soundSel').value=state.sound;$('soundSel').onchange=e=>{state.sound=e.target.value;save();};
+  $('soundSel').value=state.sound;$('soundSel').onchange=e=>{state.sound=e.target.value;save();loadPiano();pianoInfo();};
   $('volRange').value=state.vol;$('volRange').oninput=e=>{state.vol=+e.target.value;if(master)master.gain.value=state.vol;save();};
   $('revRange').value=state.reverb;$('revRange').oninput=e=>{state.reverb=+e.target.value;if(revGain)revGain.gain.value=state.reverb*0.6;save();};
   seg('stackSeg','stack',true);seg('labelSeg','labels',false);
