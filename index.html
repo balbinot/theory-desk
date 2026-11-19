@@ -546,7 +546,7 @@ function buildKb(){
   }
   refreshKeys();
 }
-function labelFor(pc){return state.labels==='notes'?fnn(K.pcName(pc)):state.labels==='intervals'?fq(K.pcIv(pc)):'';}
+function labelFor(pc,inHl){if(inHl&&hl&&hl.iv&&state.labels==='intervals'&&hl.iv[pc])return fq(hl.iv[pc]);return state.labels==='notes'?fnn(K.pcName(pc)):state.labels==='intervals'?fq(K.pcIv(pc)):'';}
 function activeNotes(){return new Set([...midiDown,...sustained,...touch]);}
 function refreshKeys(){
   const act=activeNotes();
@@ -555,8 +555,8 @@ function refreshKeys(){
     el.classList.toggle('on',on);
     let html='';
     if(inS||h||on){
-      const cls=['dot'];if(pc===K.rootPc)cls.push('r');if(!inS)cls.push('out');if(h)cls.push('hl');else if(hl&&!on)cls.push('dim');
-      html='<span class="'+cls.join(' ')+'">'+(inS||h?labelFor(pc):fnn(K.pcName(pc)))+'</span>';
+      const cls=['dot'];if(h?pc===hl.rootPc:pc===K.rootPc)cls.push('r');if(!inS)cls.push('out');if(h)cls.push('hl');else if(hl&&!on)cls.push('dim');
+      html='<span class="'+cls.join(' ')+'">'+(inS||h?labelFor(pc,h):fnn(K.pcName(pc)))+'</span>';
     }
     if(el._h!==html){el.innerHTML=html;el._h=html;}
   }
@@ -589,7 +589,7 @@ function renderNow(){
 }
 function setHl(ch,invN){
   if(!ch){hl=null;}
-  else{const mids=chordMidis(ch,invN||0);hl={midis:new Set(mids),pcs:new Set(mids.map(m=>m%12)),title:fnn(ch.rootName)+fq(ch.sym),
+  else{const mids=chordMidis(ch,invN||0);const iv={};ch.tones.forEach(t=>{iv[(ch.rootPc+t.semi)%12]=t.iv;});hl={iv,rootPc:ch.rootPc,midis:new Set(mids),pcs:new Set(mids.map(m=>m%12)),title:fnn(ch.rootName)+fq(ch.sym),
     sub:fq(ch.roman)+(ch.mode?' · '+ch.mode:'')+(ch.fn?' · '+ch.fn:''),notes:ch.tones.map(t=>fnn(t.name)).join('  '),q:ch.q};}
   refreshKeys();renderFret();renderNow();
 }
@@ -609,9 +609,9 @@ function renderFret(){
     for(let f=0;f<=15;f++){
       const m=open+f,pc=m%12,inS=K.pcSet.has(pc),h=hl&&hl.pcs.has(pc);
       if(!inS&&!h)continue;
-      const cx=f===0?x0-22:x0+(f-0.5)*fw,root=pc===K.rootPc;
+      const cx=f===0?x0-22:x0+(f-0.5)*fw,root=h?pc===hl.rootPc:pc===K.rootPc;
       const fill=!inS?'var(--sunk)':root?'var(--root)':'var(--accent)',ink=!inS?'var(--ink)':root?'var(--root-ink)':'var(--accent-ink)';
-      s+='<g class="n" data-midi="'+m+'" opacity="'+(hl&&!h?0.25:1)+'"><circle cx="'+cx+'" cy="'+y+'" r="11" fill="'+fill+'"'+(h?' stroke="var(--ink)" stroke-width="3"':'')+'/><text x="'+cx+'" y="'+y+'" fill="'+ink+'">'+labelFor(pc)+'</text></g>';
+      s+='<g class="n" data-midi="'+m+'" opacity="'+(hl&&!h?0.25:1)+'"><circle cx="'+cx+'" cy="'+y+'" r="11" fill="'+fill+'"'+(h?' stroke="var(--ink)" stroke-width="3"':'')+'/><text x="'+cx+'" y="'+y+'" fill="'+ink+'">'+labelFor(pc,h)+'</text></g>';
     }
   }
   $('fb').innerHTML=s;
